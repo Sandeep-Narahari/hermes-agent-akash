@@ -1,0 +1,6 @@
+# Don't send old files into the Docker build context
+oldDockerfile
+oldentrypoint.sh
+*.md
+.git
+.gitignore
