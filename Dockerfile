@@ -20,16 +20,16 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ln -s /root/.local/bin/uv /usr/local/bin/uv
 
 # ── 3. Clone & build everything at image build time ─────────────────────────
-#    Built into /app/hermes-seed (image layer) so it's always available.
+#    Built into /app/hermes-build (image layer) so it's always available.
 #    On first boot the entrypoint rsyncs this into /opt/data/hermes (PVC).
 ARG HERMES_BRANCH=main
 RUN git clone --branch "${HERMES_BRANCH}" \
-        https://github.com/NousResearch/hermes-agent.git /app/hermes-seed
+        https://github.com/NousResearch/hermes-agent.git /app/hermes-build
 
-WORKDIR /app/hermes-seed
+WORKDIR /app/hermes-build
 
 # ── 4. Node dependencies & Playwright ───────────────────────────────────────
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/hermes-seed/playwright-browsers
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/hermes-build/playwright-browsers
 RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
     npm cache clean --force
@@ -42,11 +42,14 @@ RUN uv venv && \
 RUN git checkout -- . && git clean -fd
 
 # ── 6. Entrypoint at /opt/entrypoint.sh (outside /opt/data mount) ───────────
-RUN mkdir -p /opt/data
+RUN mkdir -p /opt/data/hermes
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
 
 ENV HERMES_HOME=/opt/data
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/data/hermes/playwright-browsers
+
+# Shell lands here when user execs into the container
+WORKDIR /opt/data/hermes
 
 ENTRYPOINT ["/opt/entrypoint.sh"]
