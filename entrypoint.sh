@@ -20,8 +20,18 @@ if [ ! -f "${INSTALL_DIR}/.venv/bin/activate" ]; then
     echo "==> First boot: copying pre-built Hermes into persistent storage..."
     mkdir -p "${INSTALL_DIR}"
     rsync -a "${SEED_DIR}/" "${INSTALL_DIR}/"
+
+    # Re-run editable install so venv paths point to /opt/data/hermes
+    # (the seed venv has hardcoded paths to /app/hermes-seed)
+    echo "==> Fixing Python package paths for persistent storage..."
+    cd "${INSTALL_DIR}"
+    source "${INSTALL_DIR}/.venv/bin/activate"
+    uv pip install --no-cache-dir -e ".[all]"
     echo "==> Done. Hermes is now in persistent storage."
 fi
+
+# ── Always work from the persistent copy ─────────────────────────────────────
+cd "${INSTALL_DIR}"
 
 # ── Activate the Python virtual-env ──────────────────────────────────────────
 source "${INSTALL_DIR}/.venv/bin/activate"
