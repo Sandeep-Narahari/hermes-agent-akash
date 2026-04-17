@@ -7,7 +7,7 @@
 set -e
 
 export HERMES_HOME="${HERMES_HOME:-/opt/data}"
-INSTALL_DIR="/opt/hermes"
+INSTALL_DIR="/opt/data/hermes"
 
 # ── Activate the Python virtual-env ──────────────────────────────────────────
 source "${INSTALL_DIR}/.venv/bin/activate"

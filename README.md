@@ -19,7 +19,7 @@ docker run -d \
   -e TELEGRAM_ALLOWED_USERS=XXX \
   -e GATEWAY_ALLOW_ALL_USERS=false \
   -v hermes-data:/opt/data \
-  hermes-agent-akash:latest
+  hermes-agent-akash:XXXXX
 ```
 
 ## Environment Variables
