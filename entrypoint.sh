@@ -34,6 +34,9 @@ if [ ! -f "${INSTALL_DIR}/.setup_complete" ]; then
     echo "==> Done. Hermes is running from persistent storage."
 fi
 
+# ── Remove the seed copy — only /opt/data/hermes should exist at runtime ─────
+rm -rf "${SEED_DIR}" 2>/dev/null || true
+
 # ── Always work from the persistent copy ─────────────────────────────────────
 cd "${INSTALL_DIR}"
 
