@@ -8,45 +8,19 @@ set -e
 
 export HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/data/hermes"
+SEED_DIR="/app/hermes-seed"
 
-# ── First-boot install ───────────────────────────────────────────────────────
-# The Akash persistent volume mounts at /opt/data and is EMPTY on first
-# deployment. We clone and install everything directly into /opt/data/hermes
-# so it all lives in persistent storage from day one.
-# Subsequent restarts detect the existing install and skip this entirely.
+# ── First-boot: rsync pre-built seed into persistent volume ──────────────────
+# The Akash PVC mounts at /opt/data and starts EMPTY on first deployment,
+# wiping anything the image put there at build time.
+# Everything was pre-built into /app/hermes-seed at Docker build time.
+# We rsync it into /opt/data/hermes on first boot only (handles non-empty dirs).
+# After this, /opt/data/hermes persists across all restarts and /update pulls.
 if [ ! -f "${INSTALL_DIR}/.venv/bin/activate" ]; then
-    echo "==> First boot: installing Hermes into ${INSTALL_DIR} ..."
-    echo "    (this takes 3-5 minutes — only happens once)"
-
-    HERMES_BRANCH="${HERMES_BRANCH:-main}"
+    echo "==> First boot: copying pre-built Hermes into persistent storage..."
     mkdir -p "${INSTALL_DIR}"
-
-    # Clone the repo
-    echo "==> Cloning hermes-agent (branch: ${HERMES_BRANCH})..."
-    git clone --branch "${HERMES_BRANCH}" \
-        https://github.com/NousResearch/hermes-agent.git "${INSTALL_DIR}"
-
-    cd "${INSTALL_DIR}"
-
-    # Node dependencies
-    echo "==> Installing Node dependencies..."
-    npm install --prefer-offline --no-audit
-    npm cache clean --force
-
-    # Playwright browsers (stored in /opt/data/playwright — persistent)
-    echo "==> Installing Playwright browsers..."
-    PLAYWRIGHT_BROWSERS_PATH=/opt/data/playwright \
-        npx playwright install --with-deps chromium --only-shell
-
-    # Python venv + dependencies
-    echo "==> Installing Python dependencies..."
-    uv venv
-    uv pip install --no-cache-dir -e ".[all]"
-
-    # Clean up git modifications from npm install
-    git checkout -- . && git clean -fd
-
-    echo "==> First-boot install complete."
+    rsync -a "${SEED_DIR}/" "${INSTALL_DIR}/"
+    echo "==> Done. Hermes is now in persistent storage."
 fi
 
 # ── Activate the Python virtual-env ──────────────────────────────────────────
@@ -136,8 +110,7 @@ fi
 if [ ! -f "$HERMES_HOME/config.yaml" ]; then
     cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
 
-    # Use Python to safely update config.yaml — sed injection can produce
-    # malformed YAML which causes HTTP 400 "JSON parse" errors.
+    # Use Python to safely update config.yaml
     python3 - <<'PYEOF'
 import yaml, os, sys
 
@@ -182,9 +155,6 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
-# Auto-detect gateway mode: if any messaging platform token is set and the
-# caller did not explicitly pass a subcommand, run the gateway in the
-# foreground (hermes gateway) instead of the interactive CLI.
 if [ $# -eq 0 ] && {
     [ -n "$TELEGRAM_BOT_TOKEN" ] ||
     [ -n "$DISCORD_BOT_TOKEN" ] ||
