@@ -9,6 +9,46 @@ set -e
 export HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/data/hermes"
 
+# ── First-boot install ───────────────────────────────────────────────────────
+# The Akash persistent volume mounts at /opt/data and is EMPTY on first
+# deployment. We clone and install everything directly into /opt/data/hermes
+# so it all lives in persistent storage from day one.
+# Subsequent restarts detect the existing install and skip this entirely.
+if [ ! -f "${INSTALL_DIR}/.venv/bin/activate" ]; then
+    echo "==> First boot: installing Hermes into ${INSTALL_DIR} ..."
+    echo "    (this takes 3-5 minutes — only happens once)"
+
+    HERMES_BRANCH="${HERMES_BRANCH:-main}"
+    mkdir -p "${INSTALL_DIR}"
+
+    # Clone the repo
+    echo "==> Cloning hermes-agent (branch: ${HERMES_BRANCH})..."
+    git clone --branch "${HERMES_BRANCH}" \
+        https://github.com/NousResearch/hermes-agent.git "${INSTALL_DIR}"
+
+    cd "${INSTALL_DIR}"
+
+    # Node dependencies
+    echo "==> Installing Node dependencies..."
+    npm install --prefer-offline --no-audit
+    npm cache clean --force
+
+    # Playwright browsers (stored in /opt/data/playwright — persistent)
+    echo "==> Installing Playwright browsers..."
+    PLAYWRIGHT_BROWSERS_PATH=/opt/data/playwright \
+        npx playwright install --with-deps chromium --only-shell
+
+    # Python venv + dependencies
+    echo "==> Installing Python dependencies..."
+    uv venv
+    uv pip install --no-cache-dir -e ".[all]"
+
+    # Clean up git modifications from npm install
+    git checkout -- . && git clean -fd
+
+    echo "==> First-boot install complete."
+fi
+
 # ── Activate the Python virtual-env ──────────────────────────────────────────
 source "${INSTALL_DIR}/.venv/bin/activate"
 
