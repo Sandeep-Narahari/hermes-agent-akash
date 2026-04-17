@@ -168,7 +168,7 @@ fi
 
 # ── Sync bundled skills ──────────────────────────────────────────────────────
 if [ -d "$INSTALL_DIR/skills" ]; then
-    python3 "$INSTALL_DIR/tools/skills_sync.py"
+    PYTHONPATH="$INSTALL_DIR" python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
