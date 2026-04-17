@@ -6,23 +6,21 @@
 # ============================================================================
 set -e
 
-export HERMES_HOME="${HERMES_HOME:-/opt/data}"
+export HERMES_HOME="${HERMES_HOME:-/opt/data/data_dir}"
 INSTALL_DIR="/opt/data/hermes"
 BUILD_DIR="/app/hermes-build"
+SETUP_MARKER="/opt/data/.setup_complete_v2"   # outside both home and hermes
 
-# ── Redirect $HOME to persistent storage ─────────────────────────────────────
-# Prevents data loss from tools writing to ~/.config, ~/.local, ~/.cache, etc.
-export HOME="${HERMES_HOME}/home"
+# ── Redirect $HOME to persistent user data dir ───────────────────────────────
+# HERMES_HOME IS the home — tools writing to ~/.config, ~/.local, etc. persist.
+export HOME="${HERMES_HOME}"
 mkdir -p "$HOME"
 
 # ── Seed & fix: rsync pre-built image into persistent volume ─────────────────
 # The Akash PVC mounts at /opt/data and starts EMPTY on first deployment.
 # Everything was pre-built into /app/hermes-build at Docker build time.
 # We rsync it into /opt/data/hermes on first boot only.
-# The .setup_complete_v2 marker ensures we also fix existing deployments that
-# have the venv but with editable install paths pointing to /app/hermes-build.
-# We store the marker in HERMES_HOME (outside the repo) so git remains clean.
-if [ ! -f "${HERMES_HOME}/.setup_complete_v2" ]; then
+if [ ! -f "${SETUP_MARKER}" ]; then
     echo "==> Setting up Hermes in persistent storage..."
     mkdir -p "${INSTALL_DIR}"
     rsync -a "${BUILD_DIR}/" "${INSTALL_DIR}/"
@@ -38,16 +36,11 @@ if [ ! -f "${HERMES_HOME}/.setup_complete_v2" ]; then
     source "${INSTALL_DIR}/.venv/bin/activate"
     uv pip install --no-cache-dir -e ".[all]"
 
-    # Mark setup complete — subsequent boots skip all of the above
-    touch "${HERMES_HOME}/.setup_complete_v2"
-
-    # Clean up old markers if they exist inside the repo so git status stays clean
-    rm -f "${INSTALL_DIR}/.setup_complete" "${INSTALL_DIR}/.setup_complete_v2" 2>/dev/null || true
-
+    touch "${SETUP_MARKER}"
     echo "==> Done. Hermes is running from persistent storage."
 fi
 
-# ── Clear build dir contents (keep the directory so shell WORKDIR stays valid)
+# ── Clear build dir contents (keep directory so WORKDIR stays valid) ─────────
 find "${BUILD_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 
 # ── Always work from the persistent copy ─────────────────────────────────────

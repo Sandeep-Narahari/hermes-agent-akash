@@ -42,14 +42,15 @@ RUN uv venv && \
 RUN git checkout -- . && git clean -fd
 
 # ── 6. Entrypoint at /opt/entrypoint.sh (outside /opt/data mount) ───────────
-RUN mkdir -p /opt/data/hermes
+RUN mkdir -p /opt/data/hermes /opt/data/data_dir
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
 
-ENV HERMES_HOME=/opt/data
+# HERMES_HOME is the user data dir — separate from the code repo
+ENV HERMES_HOME=/opt/data/data_dir
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/data/hermes/playwright-browsers
 
-# Shell lands here when user execs into the container
+# Shell lands in the live code repo when user execs into the container
 WORKDIR /opt/data/hermes
 
 ENTRYPOINT ["/opt/entrypoint.sh"]
