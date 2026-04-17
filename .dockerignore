@@ -1,6 +1,20 @@
-# Don't send old files into the Docker build context
-oldDockerfile
-oldentrypoint.sh
-*.md
+# Git
 .git
 .gitignore
+.gitattributes
+
+# CI/CD (not needed inside the image)
+.github
+
+# Docs
+*.md
+LICENSE
+
+# Local dev overrides
+.env
+.env.*
+docker-compose*.yml
+
+# OS junk
+.DS_Store
+Thumbs.db
