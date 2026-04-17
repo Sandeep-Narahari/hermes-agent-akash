@@ -10,6 +10,11 @@ export HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/data/hermes"
 SEED_DIR="/app/hermes-seed"
 
+# ── Redirect $HOME to persistent storage ─────────────────────────────────────
+# Prevents data loss from tools writing to ~/.config, ~/.local, ~/.cache, etc.
+export HOME="${HERMES_HOME}/home"
+mkdir -p "$HOME"
+
 # ── Seed & fix: rsync pre-built seed into persistent volume ──────────────────
 # The Akash PVC mounts at /opt/data and starts EMPTY on first deployment,
 # wiping anything the image put there at build time.
@@ -105,6 +110,17 @@ if [ -n "$SSH_PASSWORD" ] || [ -n "$SSH_PUBKEY" ]; then
         chmod 600 /root/.ssh/authorized_keys
         sed -i 's/#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
     fi
+    # Persist SSH host keys to PVC so they survive image rebuilds
+    SSH_KEY_DIR="${HERMES_HOME}/ssh-host-keys"
+    mkdir -p "$SSH_KEY_DIR"
+    for type in rsa ecdsa ed25519; do
+        KEY_FILE="$SSH_KEY_DIR/ssh_host_${type}_key"
+        if [ ! -f "$KEY_FILE" ]; then
+            ssh-keygen -t "$type" -f "$KEY_FILE" -N "" -q
+        fi
+        echo "HostKey ${KEY_FILE}" >> /etc/ssh/sshd_config
+    done
+
     /usr/sbin/sshd
     echo "SSH server started."
 fi
@@ -177,7 +193,7 @@ fi
 
 # ── Sync bundled skills ──────────────────────────────────────────────────────
 if [ -d "$INSTALL_DIR/skills" ]; then
-    PYTHONPATH="$INSTALL_DIR" python3 "$INSTALL_DIR/tools/skills_sync.py"
+    PYTHONPATH="$INSTALL_DIR" python3 "$INSTALL_DIR/tools/skills_sync.py" || true
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
