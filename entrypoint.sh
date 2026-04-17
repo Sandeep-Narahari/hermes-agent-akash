@@ -15,9 +15,9 @@ SEED_DIR="/app/hermes-seed"
 # wiping anything the image put there at build time.
 # Everything was pre-built into /app/hermes-seed at Docker build time.
 # We rsync it into /opt/data/hermes on first boot only (handles non-empty dirs).
-# The .setup_complete marker ensures we also fix existing deployments that
+# The .setup_complete_v2 marker ensures we also fix existing deployments that
 # have the venv but with editable install paths pointing to /app/hermes-seed.
-if [ ! -f "${INSTALL_DIR}/.setup_complete" ]; then
+if [ ! -f "${INSTALL_DIR}/.setup_complete_v2" ]; then
     echo "==> Setting up Hermes in persistent storage..."
     mkdir -p "${INSTALL_DIR}"
     rsync -a "${SEED_DIR}/" "${INSTALL_DIR}/"
@@ -26,11 +26,15 @@ if [ ! -f "${INSTALL_DIR}/.setup_complete" ]; then
     # (the seed venv has hardcoded paths to /app/hermes-seed)
     echo "==> Fixing Python package paths for persistent storage..."
     cd "${INSTALL_DIR}"
+    
+    # Fix hardcoded shebangs in virtualenv scripts (fixes 'hermes: not found')
+    find "${INSTALL_DIR}/.venv/bin" -type f -exec sed -i "s|${SEED_DIR}|${INSTALL_DIR}|g" {} + 2>/dev/null || true
+    
     source "${INSTALL_DIR}/.venv/bin/activate"
     uv pip install --no-cache-dir -e ".[all]"
 
     # Mark setup complete — subsequent boots skip all of the above
-    touch "${INSTALL_DIR}/.setup_complete"
+    touch "${INSTALL_DIR}/.setup_complete_v2"
     echo "==> Done. Hermes is running from persistent storage."
 fi
 
