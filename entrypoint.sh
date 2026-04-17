@@ -17,7 +17,8 @@ SEED_DIR="/app/hermes-seed"
 # We rsync it into /opt/data/hermes on first boot only (handles non-empty dirs).
 # The .setup_complete_v2 marker ensures we also fix existing deployments that
 # have the venv but with editable install paths pointing to /app/hermes-seed.
-if [ ! -f "${INSTALL_DIR}/.setup_complete_v2" ]; then
+# We store the marker in HERMES_HOME (outside the repo) so git remains clean.
+if [ ! -f "${HERMES_HOME}/.setup_complete_v2" ]; then
     echo "==> Setting up Hermes in persistent storage..."
     mkdir -p "${INSTALL_DIR}"
     rsync -a "${SEED_DIR}/" "${INSTALL_DIR}/"
@@ -34,7 +35,11 @@ if [ ! -f "${INSTALL_DIR}/.setup_complete_v2" ]; then
     uv pip install --no-cache-dir -e ".[all]"
 
     # Mark setup complete — subsequent boots skip all of the above
-    touch "${INSTALL_DIR}/.setup_complete_v2"
+    touch "${HERMES_HOME}/.setup_complete_v2"
+    
+    # Clean up old markers if they exist inside the repo so git status stays clean
+    rm -f "${INSTALL_DIR}/.setup_complete" "${INSTALL_DIR}/.setup_complete_v2" 2>/dev/null || true
+    
     echo "==> Done. Hermes is running from persistent storage."
 fi
 
