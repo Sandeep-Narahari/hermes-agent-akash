@@ -10,14 +10,15 @@ export HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/data/hermes"
 SEED_DIR="/app/hermes-seed"
 
-# ── First-boot: rsync pre-built seed into persistent volume ──────────────────
+# ── Seed & fix: rsync pre-built seed into persistent volume ──────────────────
 # The Akash PVC mounts at /opt/data and starts EMPTY on first deployment,
 # wiping anything the image put there at build time.
 # Everything was pre-built into /app/hermes-seed at Docker build time.
 # We rsync it into /opt/data/hermes on first boot only (handles non-empty dirs).
-# After this, /opt/data/hermes persists across all restarts and /update pulls.
-if [ ! -f "${INSTALL_DIR}/.venv/bin/activate" ]; then
-    echo "==> First boot: copying pre-built Hermes into persistent storage..."
+# The .setup_complete marker ensures we also fix existing deployments that
+# have the venv but with editable install paths pointing to /app/hermes-seed.
+if [ ! -f "${INSTALL_DIR}/.setup_complete" ]; then
+    echo "==> Setting up Hermes in persistent storage..."
     mkdir -p "${INSTALL_DIR}"
     rsync -a "${SEED_DIR}/" "${INSTALL_DIR}/"
 
@@ -27,7 +28,10 @@ if [ ! -f "${INSTALL_DIR}/.venv/bin/activate" ]; then
     cd "${INSTALL_DIR}"
     source "${INSTALL_DIR}/.venv/bin/activate"
     uv pip install --no-cache-dir -e ".[all]"
-    echo "==> Done. Hermes is now in persistent storage."
+
+    # Mark setup complete — subsequent boots skip all of the above
+    touch "${INSTALL_DIR}/.setup_complete"
+    echo "==> Done. Hermes is running from persistent storage."
 fi
 
 # ── Always work from the persistent copy ─────────────────────────────────────
