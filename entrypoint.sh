@@ -226,7 +226,7 @@ if [ "${WEB_TERMINAL_ENABLED,,}" = "true" ]; then
         --writable \
         -t rendererType=canvas \
         --credential "user:${WEB_TERMINAL_PASSWORD}" \
-        "${INSTALL_DIR}/.venv/bin/hermes"
+        /bin/bash
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
