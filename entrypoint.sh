@@ -188,6 +188,47 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     PYTHONPATH="$INSTALL_DIR" python3 "$INSTALL_DIR/tools/skills_sync.py" || true
 fi
 
+# ── Web Terminal ─────────────────────────────────────────────────────────────
+# Set WEB_TERMINAL_ENABLED=true to expose hermes CLI chat in a browser terminal
+# via ttyd. Access at http://<akash-url>:<WEB_TERMINAL_PORT> (default 7681).
+#
+# Auth: set WEB_TERMINAL_PASSWORD for basic auth. If unset, a random password
+# is generated and printed to logs on startup.
+if [ "${WEB_TERMINAL_ENABLED,,}" = "true" ]; then
+    WEB_PORT="${WEB_TERMINAL_PORT:-7681}"
+
+    if [ -z "$WEB_TERMINAL_PASSWORD" ]; then
+        WEB_TERMINAL_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+        echo "================================================================"
+        echo "  Web terminal password (auto-generated): ${WEB_TERMINAL_PASSWORD}"
+        echo "  Set WEB_TERMINAL_PASSWORD env var to use a fixed password."
+        echo "================================================================"
+    fi
+
+    echo "==> Starting web terminal on port ${WEB_PORT}..."
+
+    # Run messaging gateway in background if tokens are present
+    if [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$DISCORD_BOT_TOKEN" ] || \
+       [ -n "$SLACK_BOT_TOKEN" ] || [ -n "$SLACK_APP_TOKEN" ] || \
+       [ -n "$WHATSAPP_ENABLED" ] || [ -n "$SIGNAL_HTTP_URL" ] || \
+       [ -n "$MATRIX_HOMESERVER" ] || [ -n "$DINGTALK_CLIENT_ID" ] || \
+       [ -n "$FEISHU_APP_ID" ] || [ -n "$WECOM_BOT_ID" ] || \
+       [ -n "$TWILIO_ACCOUNT_SID" ] || [ -n "$EMAIL_ADDRESS" ]; then
+        hermes gateway &
+        echo "Gateway started in background alongside web terminal."
+    fi
+
+    export TERM=xterm-256color
+    export COLORTERM=truecolor
+
+    exec ttyd \
+        --port "${WEB_PORT}" \
+        --writable \
+        -t rendererType=canvas \
+        --credential "user:${WEB_TERMINAL_PASSWORD}" \
+        "${INSTALL_DIR}/.venv/bin/hermes"
+fi
+
 # ── Launch ───────────────────────────────────────────────────────────────────
 if [ $# -eq 0 ] && {
     [ -n "$TELEGRAM_BOT_TOKEN" ] ||

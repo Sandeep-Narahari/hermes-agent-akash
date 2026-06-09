@@ -46,11 +46,18 @@ RUN mkdir -p /opt/data/hermes /opt/data/data_dir
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
 
+# ── 7. ttyd — web terminal (serves hermes CLI in browser) ───────────────────
+RUN curl -Lo /usr/local/bin/ttyd \
+        https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 && \
+    chmod +x /usr/local/bin/ttyd
+
 # HERMES_HOME is the user data dir — separate from the code repo
 ENV HERMES_HOME=/opt/data/data_dir
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/data/hermes/playwright-browsers
 
 # Shell lands in the live code repo when user execs into the container
 WORKDIR /opt/data/hermes
+
+EXPOSE 7681
 
 ENTRYPOINT ["/opt/entrypoint.sh"]
