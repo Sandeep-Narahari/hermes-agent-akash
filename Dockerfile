@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14.6-slim
 
 # Disable Python stdout buffering to ensure logs are printed immediately
 ENV PYTHONUNBUFFERED=1
