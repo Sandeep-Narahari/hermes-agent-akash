@@ -7,7 +7,8 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential git curl wget openssh-server ca-certificates gnupg \
-        ripgrep ffmpeg gcc g++ make python3-dev libffi-dev procps rsync && \
+        ripgrep ffmpeg gcc g++ make python3-dev libffi-dev procps rsync \
+        libolm-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # ── 1b. Node.js 22 from NodeSource ──────────────────────────────────────────
@@ -36,7 +37,8 @@ RUN npm install --prefer-offline --no-audit && \
 
 # ── 5. Python virtual-env & dependencies ────────────────────────────────────
 RUN uv venv && \
-    uv pip install --no-cache-dir -e ".[all]"
+    uv pip install --no-cache-dir -e ".[all]" && \
+    uv pip install --no-cache-dir -e ".[matrix]"
 
 # ── 5b. Reset git state ─────────────────────────────────────────────────────
 RUN git checkout -- . && git clean -fd
