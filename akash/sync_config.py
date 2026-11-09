@@ -97,7 +97,10 @@ def sync_config() -> None:
     model = os.environ.get("LLM_MODEL", "").strip()
     base_url = os.environ.get("OPENAI_BASE_URL", "").strip().rstrip("/")
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not (model or base_url or api_key) or not CONFIG_PATH.exists():
+    # Some models reject Hermes's default "medium" effort (e.g. Kimi K3.1 Pro
+    # on AkashML only accepts low/high/max), so let the SDL pin it.
+    effort = os.environ.get("REASONING_EFFORT", "").strip().lower()
+    if not (model or base_url or api_key or effort) or not CONFIG_PATH.exists():
         return
 
     from ruamel.yaml import YAML  # round-trip mode keeps comments
@@ -128,6 +131,16 @@ def sync_config() -> None:
         if model_cfg.get(key) != value:
             model_cfg[key] = value
             changed = True
+
+    if effort:
+        agent_cfg = cfg.get("agent")
+        if not isinstance(agent_cfg, dict):
+            agent_cfg = {}
+            cfg["agent"] = agent_cfg
+        if agent_cfg.get("reasoning_effort") != effort:
+            agent_cfg["reasoning_effort"] = effort
+            changed = True
+
     if not changed:
         return
 
@@ -138,7 +151,8 @@ def sync_config() -> None:
     _atomic_write(CONFIG_PATH, buf.getvalue(), 0o640)
     log(
         "config.yaml updated: "
-        f"model={model or '(unchanged)'} base_url={base_url or '(unchanged)'}"
+        f"model={model or '(unchanged)'} base_url={base_url or '(unchanged)'} "
+        f"reasoning_effort={effort or '(unchanged)'}"
     )
 
 
