@@ -41,6 +41,7 @@ docker run -d \
 | `OPENAI_BASE_URL` | OpenAI-compatible endpoint, e.g. `https://api.akashml.com/v1`. Setting it selects `provider: custom`. |
 | `OPENAI_API_KEY` | API key for that endpoint (e.g. your AkashML key). |
 | `LLM_MODEL` | Model name, e.g. `Qwen/Qwen3-235B-A22B`. |
+| `REASONING_EFFORT` | Sets `agent.reasoning_effort`. Hermes defaults to `medium`, which some models reject: AkashML's `moonshotai/Kimi-K3.1-Pro` accepts only `low`, `high` or `max` and returns HTTP 500 otherwise. Options: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
 
 ### Messaging
 
