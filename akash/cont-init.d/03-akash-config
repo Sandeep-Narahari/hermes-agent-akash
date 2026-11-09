@@ -1,0 +1,60 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Akash post-setup. Runs as root AFTER upstream's 01-hermes-setup has seeded
+# $HERMES_HOME (.env, config.yaml, SOUL.md, skills).
+#
+#  1. Sync deployment env vars into $HERMES_HOME/.env and config.yaml
+#     (every boot, so changing an env var in the SDL takes effect on redeploy).
+#  2. Session-DB schema migration (no-op when current).
+#  3. Optional SSH server.
+set -u
+
+HERMES_HOME="${HERMES_HOME:-/opt/data/data_dir}"
+log() { echo "[akash] $*"; }
+
+# ── 1. Env -> .env / config.yaml (as the hermes user, keeps ownership) ──────
+HOME=/opt/data /command/s6-setuidgid hermes \
+    /opt/hermes/.venv/bin/python -I /opt/akash/sync_config.py || \
+    log "Warning: env -> config sync failed — continuing with existing config"
+
+# Apply any pending session-DB schema migrations from older Hermes releases.
+HOME=/opt/data timeout 300 /command/s6-setuidgid hermes \
+    /opt/hermes/.venv/bin/python -I /opt/akash/migrate_state.py || \
+    log "Warning: session database migration check failed — continuing"
+
+# ── 3. SSH server (optional) ────────────────────────────────────────────────
+if [ -n "${SSH_PASSWORD:-}" ] || [ -n "${SSH_PUBKEY:-}" ]; then
+    mkdir -p /run/sshd /root/.ssh
+    chmod 700 /root/.ssh
+    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    if [ -n "${SSH_PASSWORD:-}" ]; then
+        echo "root:${SSH_PASSWORD}" | chpasswd
+        sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    fi
+    if [ -n "${SSH_PUBKEY:-}" ]; then
+        touch /root/.ssh/authorized_keys
+        grep -qxF "$SSH_PUBKEY" /root/.ssh/authorized_keys || \
+            echo "$SSH_PUBKEY" >> /root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+    fi
+    # Host keys persist on the volume so clients don't see key changes.
+    key_dir="${HERMES_HOME}/ssh-host-keys"
+    mkdir -p "$key_dir"
+    chown root:root "$key_dir"
+    chmod 700 "$key_dir"
+    for type in rsa ecdsa ed25519; do
+        key="${key_dir}/ssh_host_${type}_key"
+        [ -f "$key" ] || ssh-keygen -t "$type" -f "$key" -N "" -q
+        chown root:root "$key" "$key.pub" 2>/dev/null || true
+        chmod 600 "$key"
+        grep -qxF "HostKey ${key}" /etc/ssh/sshd_config || \
+            echo "HostKey ${key}" >> /etc/ssh/sshd_config
+    done
+    if /usr/sbin/sshd; then
+        log "SSH server started (root login; use 'hermes' as normal — it runs as the hermes user)."
+    else
+        log "Warning: sshd failed to start"
+    fi
+fi
+
+exit 0

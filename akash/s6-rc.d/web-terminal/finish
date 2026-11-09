@@ -1,0 +1,7 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Disabled -> 125 (permanent failure, don't restart). Enabled -> restart on exit.
+case "${WEB_TERMINAL_ENABLED:-}" in
+    1|true|TRUE|True|yes|YES|Yes) exit 0 ;;
+    *) exit 125 ;;
+esac

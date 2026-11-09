@@ -1,63 +1,66 @@
-FROM python:3.11-slim
+# ============================================================================
+# hermes-agent-akash
+#
+# Thin Akash layer on top of the official Hermes Agent image. Upstream now
+# ships a sealed, immutable install at /opt/hermes (pinned toolchain, prebuilt
+# TUI/dashboard, s6-overlay supervision, non-root runtime user). We keep all
+# of that and only add what Akash deployments need:
+#
+#   - env vars -> $HERMES_HOME/.env + config.yaml sync on every boot
+#   - one-time migration of volumes created by the old (pre-v0.23) image
+#   - optional SSH server
+#   - optional ttyd web terminal (s6-supervised)
+#   - default command: messaging gateway when tokens are set, else idle
+#
+# To update Hermes: bump HERMES_VERSION (an official release tag from
+# https://hub.docker.com/r/nousresearch/hermes-agent/tags) and rebuild.
+# ============================================================================
+ARG HERMES_VERSION=v0.23.0
+FROM nousresearch/hermes-agent:${HERMES_VERSION}
 
-# Disable Python stdout buffering to ensure logs are printed immediately
-ENV PYTHONUNBUFFERED=1
+USER root
 
-# ── 1. System dependencies ──────────────────────────────────────────────────
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential git curl wget openssh-server ca-certificates gnupg \
-        ripgrep ffmpeg gcc g++ make python3-dev libffi-dev procps rsync && \
-    rm -rf /var/lib/apt/lists/*
+# ── SSH server (optional at runtime) ────────────────────────────────────────
+RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends openssh-server && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /etc/ssh/ssh_host_*
 
-# ── 1b. Node.js 22 from NodeSource ──────────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
+# ── ttyd web terminal ───────────────────────────────────────────────────────
+ARG TARGETARCH
+ARG TTYD_VERSION=1.7.7
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) ttyd_arch="x86_64" ;; \
+        arm64) ttyd_arch="aarch64" ;; \
+        *) echo "Unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 3 -o /usr/local/bin/ttyd \
+        "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ttyd_arch}"; \
+    chmod 0755 /usr/local/bin/ttyd; \
+    ttyd --version
 
-# ── 2. Install uv ───────────────────────────────────────────────────────────
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -s /root/.local/bin/uv /usr/local/bin/uv
+# ── Akash boot scripts ──────────────────────────────────────────────────────
+# 00-akash-migrate runs before upstream's 01-hermes-setup (stage2 hook);
+# 03-akash-config runs after it, once .env/config.yaml have been seeded.
+COPY --chmod=0755 akash/ /opt/akash/
+RUN ln -s /opt/akash/cont-init.d/00-akash-migrate /etc/cont-init.d/00-akash-migrate && \
+    ln -s /opt/akash/cont-init.d/03-akash-config /etc/cont-init.d/03-akash-config && \
+    cp -r /opt/akash/s6-rc.d/web-terminal /etc/s6-overlay/s6-rc.d/web-terminal && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/web-terminal
 
-# ── 3. Clone & build everything at image build time ─────────────────────────
-#    Built into /app/hermes-build (image layer) so it's always available.
-#    On first boot the entrypoint rsyncs this into /opt/data/hermes (PVC).
-ARG HERMES_BRANCH=main
-RUN git clone --branch "${HERMES_BRANCH}" \
-        https://github.com/NousResearch/hermes-agent.git /app/hermes-build
-
-WORKDIR /app/hermes-build
-
-# ── 4. Node dependencies & Playwright ───────────────────────────────────────
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/hermes-build/playwright-browsers
-RUN npm install --prefer-offline --no-audit && \
-    npx playwright install --with-deps chromium --only-shell && \
-    npm cache clean --force
-
-# ── 5. Python virtual-env & dependencies ────────────────────────────────────
-RUN uv venv && \
-    uv pip install --no-cache-dir -e ".[all]"
-
-# ── 5b. Reset git state ─────────────────────────────────────────────────────
-RUN git checkout -- . && git clean -fd
-
-# ── 6. Entrypoint at /opt/entrypoint.sh (outside /opt/data mount) ───────────
-RUN mkdir -p /opt/data/hermes /opt/data/data_dir
-COPY entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/entrypoint.sh
-
-# ── 7. ttyd — web terminal (serves hermes CLI in browser) ───────────────────
-RUN curl -Lo /usr/local/bin/ttyd \
-        https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 && \
-    chmod +x /usr/local/bin/ttyd
-
-# HERMES_HOME is the user data dir — separate from the code repo
+# Keep the data layout of existing Akash deployments: user data has always
+# lived in /opt/data/data_dir on the persistent volume.
 ENV HERMES_HOME=/opt/data/data_dir
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/data/hermes/playwright-browsers
 
-# Shell lands in the live code repo when user execs into the container
-WORKDIR /opt/data/hermes
+# SSH sessions don't inherit the image ENV. Snapshot the Hermes-relevant vars
+# into /etc/environment (read by pam_env for every sshd session) so `hermes`
+# resolves and uses the right HERMES_HOME over SSH too.
+RUN env | grep -E '^(PATH|HERMES_[A-Z_]*|PLAYWRIGHT_BROWSERS_PATH|XDG_RUNTIME_DIR|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE)=' \
+        | sed -E 's/^([^=]+)=(.*)$/\1="\2"/' > /etc/environment && \
+    cat /etc/environment
 
 EXPOSE 7681
 
-ENTRYPOINT ["/opt/entrypoint.sh"]
+# ENTRYPOINT is inherited from upstream (entrypoint-dispatch.sh -> s6 /init).
+CMD ["/opt/akash/start.sh"]
