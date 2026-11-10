@@ -1,32 +1,34 @@
 # ============================================================================
 # hermes-agent-akash
 #
-# Thin Akash layer on top of the official Hermes Agent image. Upstream now
-# ships a sealed, immutable install at /opt/hermes (pinned toolchain, prebuilt
-# TUI/dashboard, s6-overlay supervision, non-root runtime user). We keep all
-# of that and only add what Akash deployments need:
-#
-#   - env vars -> $HERMES_HOME/.env + config.yaml sync on every boot
-#   - one-time migration of volumes created by the old (pre-v0.23) image
-#   - optional SSH server
-#   - optional ttyd web terminal (s6-supervised)
-#   - default command: messaging gateway when tokens are set, else idle
-#
-# To update Hermes: bump HERMES_VERSION (an official release tag from
-# https://hub.docker.com/r/nousresearch/hermes-agent/tags) and rebuild.
+# Runtime-only image: system libraries + tini + ttyd + sshd. Hermes itself is
+# NOT baked in. On first boot the entrypoint runs the official, untouched
+# Hermes installer (https://hermes-agent.nousresearch.com/install.sh), which
+# clones NousResearch/hermes-agent onto the persistent volume as a git
+# install. Because of that, `hermes update` / `/update` from chat work, and
+# updates survive restarts. Rebuild this image only to change system packages.
 # ============================================================================
-ARG HERMES_VERSION=v0.23.0
-FROM nousresearch/hermes-agent:${HERMES_VERSION}
+FROM debian:trixie-slim
 
-USER root
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
 
-# ── SSH server (optional at runtime) ────────────────────────────────────────
+# Base tools + build toolchain (native Python extensions, e.g. python-olm for
+# Matrix E2EE) + shared libs the pm-staged Chromium / cua-driver link against
+# (same list as upstream's Dockerfile, plus libx11-6).
 RUN apt-get -o Acquire::Retries=3 update && \
-    apt-get -o Acquire::Retries=3 install -y --no-install-recommends openssh-server && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+        ca-certificates curl wget git xz-utils procps tini tmux openssh-server \
+        iputils-ping less nano rsync \
+        build-essential cmake libffi-dev libolm-dev libatomic1 \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+        libcairo2 libcups2t64 libdbus-1-3 libgbm1 libglib2.0-0t64 libnspr4 \
+        libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 \
+        libxext6 libxfixes3 libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/ssh/ssh_host_*
 
-# ── ttyd web terminal ───────────────────────────────────────────────────────
+# ttyd web terminal
 ARG TARGETARCH
 ARG TTYD_VERSION=1.7.7
 RUN set -eu; \
@@ -40,27 +42,24 @@ RUN set -eu; \
     chmod 0755 /usr/local/bin/ttyd; \
     ttyd --version
 
-# ── Akash boot scripts ──────────────────────────────────────────────────────
-# 00-akash-migrate runs before upstream's 01-hermes-setup (stage2 hook);
-# 03-akash-config runs after it, once .env/config.yaml have been seeded.
-COPY --chmod=0755 akash/ /opt/akash/
-RUN ln -s /opt/akash/cont-init.d/00-akash-migrate /etc/cont-init.d/00-akash-migrate && \
-    ln -s /opt/akash/cont-init.d/03-akash-config /etc/cont-init.d/03-akash-config && \
-    cp -r /opt/akash/s6-rc.d/web-terminal /etc/s6-overlay/s6-rc.d/web-terminal && \
-    touch /etc/s6-overlay/s6-rc.d/user/contents.d/web-terminal
+# Everything Hermes writes lives on the /opt/data volume:
+#   /opt/data/hermes-agent   git checkout (managed by install.sh / hermes update)
+#   /opt/data/data_dir       HERMES_HOME: config, .env, sessions, memories, tools
+#   /opt/data                HOME (~/.local/bin/hermes launcher, ~/.config, ...)
+ENV HOME=/opt/data \
+    HERMES_HOME=/opt/data/data_dir \
+    HERMES_INSTALL_DIR=/opt/data/hermes-agent \
+    PATH=/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Keep the data layout of existing Akash deployments: user data has always
-# lived in /opt/data/data_dir on the persistent volume.
-ENV HERMES_HOME=/opt/data/data_dir
+# root's home is the volume too, so SSH / web-terminal shells pick up the
+# installer's ~/.bashrc PATH entry and land next to the data. SSH sessions
+# don't inherit the image ENV; pam_env reads /etc/environment.
+RUN sed -i "s#^root:\([^:]*\):0:0:\([^:]*\):/root:#root:\1:0:0:\2:/opt/data:#" /etc/passwd && \
+    printf 'HOME="%s"\nHERMES_HOME="%s"\nHERMES_INSTALL_DIR="%s"\nPATH="%s"\n' \
+        "$HOME" "$HERMES_HOME" "$HERMES_INSTALL_DIR" "$PATH" > /etc/environment
 
-# SSH sessions don't inherit the image ENV. Snapshot the Hermes-relevant vars
-# into /etc/environment (read by pam_env for every sshd session) so `hermes`
-# resolves and uses the right HERMES_HOME over SSH too.
-RUN env | grep -E '^(PATH|HERMES_[A-Z_]*|PLAYWRIGHT_BROWSERS_PATH|XDG_RUNTIME_DIR|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE)=' \
-        | sed -E 's/^([^=]+)=(.*)$/\1="\2"/' > /etc/environment && \
-    cat /etc/environment
+COPY --chmod=0755 entrypoint.sh /opt/entrypoint.sh
 
+WORKDIR /opt/data
 EXPOSE 7681
-
-# ENTRYPOINT is inherited from upstream (entrypoint-dispatch.sh -> s6 /init).
-CMD ["/opt/akash/start.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/opt/entrypoint.sh"]
